@@ -13,6 +13,30 @@ void send_message(int sock_fd, int type, const char *content)
   json_object_put(json_msg);
 }
 
+void receive_message(int sock_fd)
+{
+  char buffer[MAX_BUFFER_SIZE];
+  memset(buffer, 0, MAX_BUFFER_SIZE);
+
+  ssize_t bytes_received = recv(sock_fd, buffer, MAX_BUFFER_SIZE, 0);
+  if (bytes_received > 0)
+  {
+    struct json_object *json_msg = json_tokener_parse(buffer);
+    if (json_msg != NULL)
+    {
+      struct json_object *type_obj, *content_obj;
+      if (json_object_object_get_ex(json_msg, "type", &type_obj) &&
+          json_object_object_get_ex(json_msg, "content", &content_obj))
+      {
+        int msg_type = json_object_get_int(type_obj);
+        const char *content = json_object_get_string(content_obj);
+        printf("Received: %s\n", content);
+      }
+      json_object_put(json_msg);
+    }
+  }
+}
+
 int main()
 {
   int sock_fd;
@@ -49,6 +73,9 @@ int main()
 
   // Send initial connection message
   send_message(sock_fd, MSG_CONNECT, "Hello, Server!");
+
+  // Receive server's response about database connection
+  receive_message(sock_fd);
 
   printf("Enter messages (type 'quit' to exit):\n");
   while (1)
