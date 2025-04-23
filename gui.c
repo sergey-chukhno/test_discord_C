@@ -14,18 +14,27 @@ static void on_register_clicked(GtkWidget *widget, gpointer data)
   GtkWidget *last_name_entry = g_object_get_data(G_OBJECT(widget), "last_name");
   GtkWidget *email_entry = g_object_get_data(G_OBJECT(widget), "email");
   GtkWidget *password_entry = g_object_get_data(G_OBJECT(widget), "password");
+  GtkWidget *confirm_password_entry = g_object_get_data(G_OBJECT(widget), "confirm_password");
   GtkWidget *status_label = g_object_get_data(G_OBJECT(widget), "status");
 
   const char *first_name = gtk_entry_get_text(GTK_ENTRY(first_name_entry));
   const char *last_name = gtk_entry_get_text(GTK_ENTRY(last_name_entry));
   const char *email = gtk_entry_get_text(GTK_ENTRY(email_entry));
   const char *password = gtk_entry_get_text(GTK_ENTRY(password_entry));
+  const char *confirm_password = gtk_entry_get_text(GTK_ENTRY(confirm_password_entry));
 
   // Validate input
   if (strlen(first_name) == 0 || strlen(last_name) == 0 ||
-      strlen(email) == 0 || strlen(password) == 0)
+      strlen(email) == 0 || strlen(password) == 0 || strlen(confirm_password) == 0)
   {
     gtk_label_set_text(GTK_LABEL(status_label), "All fields are required!");
+    return;
+  }
+
+  // Check if passwords match
+  if (strcmp(password, confirm_password) != 0)
+  {
+    gtk_label_set_text(GTK_LABEL(status_label), "Passwords do not match!");
     return;
   }
 
@@ -40,6 +49,7 @@ static void on_register_clicked(GtkWidget *widget, gpointer data)
     gtk_entry_set_text(GTK_ENTRY(last_name_entry), "");
     gtk_entry_set_text(GTK_ENTRY(email_entry), "");
     gtk_entry_set_text(GTK_ENTRY(password_entry), "");
+    gtk_entry_set_text(GTK_ENTRY(confirm_password_entry), "");
   }
   else
   {
@@ -92,13 +102,16 @@ static GtkWidget *create_registration_form()
   GtkWidget *last_name_entry = gtk_entry_new();
   GtkWidget *email_entry = gtk_entry_new();
   GtkWidget *password_entry = gtk_entry_new();
+  GtkWidget *confirm_password_entry = gtk_entry_new();
   gtk_entry_set_visibility(GTK_ENTRY(password_entry), FALSE);
+  gtk_entry_set_visibility(GTK_ENTRY(confirm_password_entry), FALSE);
 
   // Create labels
   GtkWidget *first_name_label = gtk_label_new("First Name:");
   GtkWidget *last_name_label = gtk_label_new("Last Name:");
   GtkWidget *email_label = gtk_label_new("Email:");
   GtkWidget *password_label = gtk_label_new("Password:");
+  GtkWidget *confirm_password_label = gtk_label_new("Confirm Password:");
 
   // Create register button
   GtkWidget *register_button = gtk_button_new_with_label("Register");
@@ -113,6 +126,8 @@ static GtkWidget *create_registration_form()
   gtk_box_pack_start(GTK_BOX(vbox), email_entry, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(vbox), password_label, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(vbox), password_entry, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(vbox), confirm_password_label, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(vbox), confirm_password_entry, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(vbox), register_button, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(vbox), status_label, FALSE, FALSE, 0);
 
@@ -121,6 +136,7 @@ static GtkWidget *create_registration_form()
   g_object_set_data(G_OBJECT(register_button), "last_name", last_name_entry);
   g_object_set_data(G_OBJECT(register_button), "email", email_entry);
   g_object_set_data(G_OBJECT(register_button), "password", password_entry);
+  g_object_set_data(G_OBJECT(register_button), "confirm_password", confirm_password_entry);
   g_object_set_data(G_OBJECT(register_button), "status", status_label);
 
   // Connect the callback
