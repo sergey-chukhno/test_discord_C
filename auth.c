@@ -127,6 +127,21 @@ AuthResult register_user(PGconn *conn, const char *first_name, const char *last_
   return result;
 }
 
+// Update user's last login time
+static void update_user_last_login(PGconn *conn, int user_id)
+{
+  const char *query = "UPDATE USERS SET last_login = CURRENT_TIMESTAMP WHERE user_id = $1";
+  const char *values[1] = {NULL};
+  char user_id_str[20];
+  snprintf(user_id_str, sizeof(user_id_str), "%d", user_id);
+  values[0] = user_id_str;
+  int lengths[1] = {strlen(user_id_str)};
+  int formats[1] = {0};
+
+  PGresult *res = PQexecParams(conn, query, 1, NULL, values, lengths, formats, 0);
+  PQclear(res);
+}
+
 // Login a user
 AuthResult login_user(PGconn *conn, const char *email, const char *password)
 {

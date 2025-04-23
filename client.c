@@ -13,6 +13,7 @@ int main()
 {
   int sockfd;
   struct sockaddr_in server_addr;
+  struct json_object *json;
 
   // Create socket
   sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -89,8 +90,7 @@ int main()
       break;
 
     case 3: // Exit
-      // Send disconnect message
-      struct json_object *json = json_object_new_object();
+      json = json_object_new_object();
       json_object_object_add(json, "type", json_object_new_int(MSG_DISCONNECT));
       json_object_object_add(json, "content", json_object_new_string("Goodbye!"));
       const char *json_str = json_object_to_json_string(json);

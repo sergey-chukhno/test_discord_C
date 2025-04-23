@@ -4,6 +4,27 @@
 #include "auth.h"
 #include <json-c/json.h>
 #include <signal.h>
+#include <errno.h>
+
+static volatile int running = 1;
+
+void handle_signal(int sig)
+{
+  (void)sig; // Suppress unused parameter warning
+  running = 0;
+}
+
+// Send error response to client
+void send_error_response(int client_fd, const char *error_message)
+{
+  struct json_object *response = json_object_new_object();
+  json_object_object_add(response, "success", json_object_new_boolean(false));
+  json_object_object_add(response, "error", json_object_new_string(error_message));
+
+  const char *response_str = json_object_to_json_string(response);
+  send(client_fd, response_str, strlen(response_str), 0);
+  json_object_put(response);
+}
 
 // Handle authentication requests
 void handle_auth_request(int client_fd, PGconn *db_conn, const char *content)
@@ -166,6 +187,11 @@ int main()
   struct sockaddr_in server_addr, client_addr;
   socklen_t client_len = sizeof(client_addr);
 
+  // Set up signal handlers
+  signal(SIGINT, handle_signal);
+  signal(SIGTERM, handle_signal);
+  signal(SIGCHLD, SIG_IGN); // Prevent zombie processes
+
   // Test database connection first
   PGconn *db_conn = connect_to_database();
   if (!db_conn)
@@ -175,9 +201,6 @@ int main()
   }
   printf("Database connection successful. Server starting...\n");
   close_database_connection(db_conn);
-
-  // Ignore SIGCHLD to prevent zombie processes
-  signal(SIGCHLD, SIG_IGN);
 
   // Create socket
   server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -192,10 +215,12 @@ int main()
   if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
   {
     perror("Setsockopt failed");
+    close(server_fd);
     exit(EXIT_FAILURE);
   }
 
   // Configure server address
+  memset(&server_addr, 0, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = INADDR_ANY;
   server_addr.sin_port = htons(SERVER_PORT);
@@ -204,6 +229,7 @@ int main()
   if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
   {
     perror("Bind failed");
+    close(server_fd);
     exit(EXIT_FAILURE);
   }
 
@@ -211,17 +237,23 @@ int main()
   if (listen(server_fd, MAX_CLIENTS) < 0)
   {
     perror("Listen failed");
+    close(server_fd);
     exit(EXIT_FAILURE);
   }
 
   printf("Server is listening on port %d...\n", SERVER_PORT);
 
-  while (1)
+  while (running)
   {
     // Accept client connection
     client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
     if (client_fd < 0)
     {
+      if (errno == EINTR)
+      {
+        // Interrupted system call, check if we should continue running
+        continue;
+      }
       perror("Accept failed");
       continue;
     }
@@ -240,6 +272,7 @@ int main()
       // Child process
       close(server_fd); // Close server socket in child
       handle_client(client_fd, client_addr);
+      exit(0); // Ensure child process exits after handling client
     }
     else
     {
@@ -248,6 +281,8 @@ int main()
     }
   }
 
+  // Cleanup
   close(server_fd);
+  printf("\nServer shutting down...\n");
   return 0;
 }
