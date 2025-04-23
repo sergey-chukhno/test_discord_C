@@ -29,25 +29,30 @@ void send_error_response(int client_fd, const char *error_message)
 // Handle authentication requests
 void handle_auth_request(int client_fd, PGconn *db_conn, const char *content)
 {
+  printf("Received auth request: %s\n", content);
+
   struct json_object *json = json_tokener_parse(content);
   if (!json)
   {
+    printf("Invalid JSON format\n");
     send_error_response(client_fd, "Invalid JSON format");
     return;
   }
 
   struct json_object *type_obj;
-  if (!json_object_object_get_ex(json, "auth_type", &type_obj))
+  if (!json_object_object_get_ex(json, "type", &type_obj))
   {
-    send_error_response(client_fd, "Missing auth_type");
+    printf("Missing message type\n");
+    send_error_response(client_fd, "Missing message type");
     json_object_put(json);
     return;
   }
 
-  const char *auth_type = json_object_get_string(type_obj);
+  const char *type = json_object_get_string(type_obj);
+  printf("Auth type: %s\n", type);
   AuthResult result;
 
-  if (strcmp(auth_type, "register") == 0)
+  if (strcmp(type, "register") == 0)
   {
     struct json_object *first_name_obj, *last_name_obj, *email_obj, *password_obj;
     if (!json_object_object_get_ex(json, "first_name", &first_name_obj) ||
@@ -55,6 +60,7 @@ void handle_auth_request(int client_fd, PGconn *db_conn, const char *content)
         !json_object_object_get_ex(json, "email", &email_obj) ||
         !json_object_object_get_ex(json, "password", &password_obj))
     {
+      printf("Missing required fields for registration\n");
       send_error_response(client_fd, "Missing required fields for registration");
       json_object_put(json);
       return;
@@ -66,24 +72,29 @@ void handle_auth_request(int client_fd, PGconn *db_conn, const char *content)
                            json_object_get_string(email_obj),
                            json_object_get_string(password_obj));
   }
-  else if (strcmp(auth_type, "login") == 0)
+  else if (strcmp(type, "login") == 0)
   {
     struct json_object *email_obj, *password_obj;
     if (!json_object_object_get_ex(json, "email", &email_obj) ||
         !json_object_object_get_ex(json, "password", &password_obj))
     {
+      printf("Missing email or password\n");
       send_error_response(client_fd, "Missing email or password");
       json_object_put(json);
       return;
     }
 
-    result = login_user(db_conn,
-                        json_object_get_string(email_obj),
-                        json_object_get_string(password_obj));
+    const char *email = json_object_get_string(email_obj);
+    const char *password = json_object_get_string(password_obj);
+    printf("Login attempt for email: %s\n", email);
+
+    result = login_user(db_conn, email, password);
+    printf("Login result: %s\n", result.success ? "success" : "failed");
   }
   else
   {
-    send_error_response(client_fd, "Invalid auth_type");
+    printf("Invalid auth type: %s\n", type);
+    send_error_response(client_fd, "Invalid auth type");
     json_object_put(json);
     return;
   }
@@ -101,6 +112,7 @@ void handle_auth_request(int client_fd, PGconn *db_conn, const char *content)
   }
 
   const char *response_str = json_object_to_json_string(response);
+  printf("Sending response: %s\n", response_str);
   send(client_fd, response_str, strlen(response_str), 0);
 
   json_object_put(json);
@@ -144,31 +156,93 @@ void handle_client(int client_fd, struct sockaddr_in client_addr)
       continue;
     }
 
-    int msg_type = json_object_get_int(type_obj);
-    struct json_object *content_obj;
-    const char *content = NULL;
+    const char *type = json_object_get_string(type_obj);
 
-    if (json_object_object_get_ex(json, "content", &content_obj))
+    if (strcmp(type, "register") == 0 || strcmp(type, "login") == 0)
     {
-      content = json_object_get_string(content_obj);
+      handle_auth_request(client_fd, db_conn, buffer);
     }
-
-    switch (msg_type)
+    else if (strcmp(type, "join") == 0)
     {
-    case MSG_CONNECT:
-      handle_auth_request(client_fd, db_conn, content);
-      break;
-    case MSG_DISCONNECT:
-      printf("Client %s:%d requested disconnect\n",
-             inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-      close_database_connection(db_conn);
-      close(client_fd);
-      json_object_put(json);
-      return;
-    case MSG_CHAT:
-      // Handle chat messages (to be implemented)
-      break;
-    default:
+      // Handle join request
+      struct json_object *user_id_obj, *username_obj;
+      if (!json_object_object_get_ex(json, "user_id", &user_id_obj) ||
+          !json_object_object_get_ex(json, "username", &username_obj))
+      {
+        send_error_response(client_fd, "Missing user_id or username");
+        json_object_put(json);
+        continue;
+      }
+
+      int user_id = json_object_get_int(user_id_obj);
+      const char *username = json_object_get_string(username_obj);
+
+      // TODO: Add user to online users list
+      struct json_object *response = json_object_new_object();
+      json_object_object_add(response, "success", json_object_new_boolean(true));
+      json_object_object_add(response, "message", json_object_new_string("Joined successfully"));
+
+      const char *response_str = json_object_to_json_string(response);
+      send(client_fd, response_str, strlen(response_str), 0);
+      json_object_put(response);
+    }
+    else if (strcmp(type, "message") == 0)
+    {
+      // Handle chat message
+      struct json_object *user_id_obj, *channel_id_obj, *message_obj;
+      if (!json_object_object_get_ex(json, "user_id", &user_id_obj) ||
+          !json_object_object_get_ex(json, "channel_id", &channel_id_obj) ||
+          !json_object_object_get_ex(json, "message", &message_obj))
+      {
+        send_error_response(client_fd, "Missing required fields for message");
+        json_object_put(json);
+        continue;
+      }
+
+      int user_id = json_object_get_int(user_id_obj);
+      int channel_id = json_object_get_int(channel_id_obj);
+      const char *message = json_object_get_string(message_obj);
+
+      // Store message in database
+      int message_id = create_message(db_conn, user_id, channel_id, message);
+      if (message_id > 0)
+      {
+        struct json_object *response = json_object_new_object();
+        json_object_object_add(response, "success", json_object_new_boolean(true));
+        json_object_object_add(response, "message_id", json_object_new_int(message_id));
+
+        const char *response_str = json_object_to_json_string(response);
+        send(client_fd, response_str, strlen(response_str), 0);
+        json_object_put(response);
+      }
+      else
+      {
+        send_error_response(client_fd, "Failed to store message");
+      }
+    }
+    else if (strcmp(type, "history") == 0)
+    {
+      // Handle history request
+      struct json_object *channel_id_obj;
+      if (!json_object_object_get_ex(json, "channel_id", &channel_id_obj))
+      {
+        send_error_response(client_fd, "Missing channel_id");
+        json_object_put(json);
+        continue;
+      }
+
+      int channel_id = json_object_get_int(channel_id_obj);
+      // TODO: Retrieve message history from database
+      struct json_object *response = json_object_new_object();
+      json_object_object_add(response, "success", json_object_new_boolean(true));
+      json_object_object_add(response, "messages", json_object_new_array());
+
+      const char *response_str = json_object_to_json_string(response);
+      send(client_fd, response_str, strlen(response_str), 0);
+      json_object_put(response);
+    }
+    else
+    {
       send_error_response(client_fd, "Unknown message type");
     }
 

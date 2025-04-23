@@ -12,7 +12,7 @@ TEST_AUTH_SRCS = test_auth.c db_connection.c db_operations.c auth.c
 TEST_AUTH_OBJS = $(TEST_AUTH_SRCS:.c=.o)
 CLIENT_SRCS = client.c client_auth.c
 CLIENT_OBJS = $(CLIENT_SRCS:.c=.o)
-GUI_SRCS = gui.c db_connection.c db_operations.c auth.c
+GUI_SRCS = gui.c gui_functions.c db_connection.c db_operations.c auth.c discord_window.c client_auth.c
 GUI_OBJS = $(GUI_SRCS:.c=.o)
 
 all: server test_db test_db_operations test_auth client gui

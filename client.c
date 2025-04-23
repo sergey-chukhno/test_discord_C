@@ -67,7 +67,7 @@ int main()
       fgets(password, sizeof(password), stdin);
       password[strcspn(password, "\n")] = '\0';
 
-      if (register_user(sockfd, first_name, last_name, email, password))
+      if (client_register_user(sockfd, first_name, last_name, email, password))
       {
         printf("Registration successful!\n");
       }
@@ -82,16 +82,21 @@ int main()
       fgets(password, sizeof(password), stdin);
       password[strcspn(password, "\n")] = '\0';
 
-      if (login_user(sockfd, email, password))
+      LoginResult result = client_login_user(sockfd, email, password);
+      if (result.success)
       {
-        printf("Login successful!\n");
+        printf("Login successful! User ID: %d\n", result.user_id);
         // TODO: Enter chat interface
+      }
+      else
+      {
+        printf("Login failed: %s\n", result.error_message);
       }
       break;
 
     case 3: // Exit
       json = json_object_new_object();
-      json_object_object_add(json, "type", json_object_new_int(MSG_DISCONNECT));
+      json_object_object_add(json, "type", json_object_new_string("disconnect"));
       json_object_object_add(json, "content", json_object_new_string("Goodbye!"));
       const char *json_str = json_object_to_json_string(json);
       send(sockfd, json_str, strlen(json_str), 0);

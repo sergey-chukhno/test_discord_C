@@ -1,7 +1,12 @@
 #include <gtk/gtk.h>
 #include "auth.h"
 #include "db_connection.h"
+#include "client_auth.h"
+#include "gui.h"
+#include "discord_window.h"
 #include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 
 // Global variables for the main window and database connection
 static GtkWidget *window;
@@ -10,12 +15,18 @@ static PGconn *conn;
 // Callback for registration form
 static void on_register_clicked(GtkWidget *widget, gpointer data)
 {
-  GtkWidget *first_name_entry = g_object_get_data(G_OBJECT(widget), "first_name");
-  GtkWidget *last_name_entry = g_object_get_data(G_OBJECT(widget), "last_name");
-  GtkWidget *email_entry = g_object_get_data(G_OBJECT(widget), "email");
-  GtkWidget *password_entry = g_object_get_data(G_OBJECT(widget), "password");
-  GtkWidget *confirm_password_entry = g_object_get_data(G_OBJECT(widget), "confirm_password");
-  GtkWidget *status_label = g_object_get_data(G_OBJECT(widget), "status");
+  GtkWidget *window = g_object_get_data(G_OBJECT(widget), "window");
+  GtkWidget *first_name_entry = g_object_get_data(G_OBJECT(widget), "first_name_entry");
+  GtkWidget *last_name_entry = g_object_get_data(G_OBJECT(widget), "last_name_entry");
+  GtkWidget *email_entry = g_object_get_data(G_OBJECT(widget), "email_entry");
+  GtkWidget *password_entry = g_object_get_data(G_OBJECT(widget), "password_entry");
+  GtkWidget *confirm_password_entry = g_object_get_data(G_OBJECT(widget), "confirm_password_entry");
+
+  if (!window || !first_name_entry || !last_name_entry || !email_entry || !password_entry || !confirm_password_entry)
+  {
+    g_print("Error: Missing widget data\n");
+    return;
+  }
 
   const char *first_name = gtk_entry_get_text(GTK_ENTRY(first_name_entry));
   const char *last_name = gtk_entry_get_text(GTK_ENTRY(last_name_entry));
@@ -27,42 +38,69 @@ static void on_register_clicked(GtkWidget *widget, gpointer data)
   if (strlen(first_name) == 0 || strlen(last_name) == 0 ||
       strlen(email) == 0 || strlen(password) == 0 || strlen(confirm_password) == 0)
   {
-    gtk_label_set_text(GTK_LABEL(status_label), "All fields are required!");
+    show_error_dialog(window, "All fields are required");
     return;
   }
 
-  // Check if passwords match
   if (strcmp(password, confirm_password) != 0)
   {
-    gtk_label_set_text(GTK_LABEL(status_label), "Passwords do not match!");
+    show_error_dialog(window, "Passwords do not match");
+    return;
+  }
+
+  // Connect to server
+  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sockfd < 0)
+  {
+    show_error_dialog(window, "Failed to create socket");
+    return;
+  }
+
+  struct sockaddr_in server_addr;
+  memset(&server_addr, 0, sizeof(server_addr));
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_port = htons(SERVER_PORT);
+  if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0)
+  {
+    show_error_dialog(window, "Invalid address");
+    close(sockfd);
+    return;
+  }
+
+  if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+  {
+    show_error_dialog(window, "Connection failed");
+    close(sockfd);
     return;
   }
 
   // Register user
-  AuthResult result = register_user(conn, first_name, last_name, email, password);
-
-  if (result.success)
+  if (client_register_user(sockfd, first_name, last_name, email, password))
   {
-    gtk_label_set_text(GTK_LABEL(status_label), "Registration successful! Please login.");
-    // Clear fields
-    gtk_entry_set_text(GTK_ENTRY(first_name_entry), "");
-    gtk_entry_set_text(GTK_ENTRY(last_name_entry), "");
-    gtk_entry_set_text(GTK_ENTRY(email_entry), "");
-    gtk_entry_set_text(GTK_ENTRY(password_entry), "");
-    gtk_entry_set_text(GTK_ENTRY(confirm_password_entry), "");
+    show_success_dialog(window, "Registration successful! Please login.");
+    close(sockfd);
+    return;
   }
   else
   {
-    gtk_label_set_text(GTK_LABEL(status_label), result.error_message);
+    show_error_dialog(window, "Registration failed");
+    close(sockfd);
+    return;
   }
 }
 
 // Callback for login form
 static void on_login_clicked(GtkWidget *widget, gpointer data)
 {
-  GtkWidget *email_entry = g_object_get_data(G_OBJECT(widget), "email");
-  GtkWidget *password_entry = g_object_get_data(G_OBJECT(widget), "password");
-  GtkWidget *status_label = g_object_get_data(G_OBJECT(widget), "status");
+  GtkWidget *window = g_object_get_data(G_OBJECT(widget), "window");
+  GtkWidget *email_entry = g_object_get_data(G_OBJECT(widget), "email_entry");
+  GtkWidget *password_entry = g_object_get_data(G_OBJECT(widget), "password_entry");
+
+  if (!window || !email_entry || !password_entry)
+  {
+    g_print("Error: Missing widget data\n");
+    return;
+  }
 
   const char *email = gtk_entry_get_text(GTK_ENTRY(email_entry));
   const char *password = gtk_entry_get_text(GTK_ENTRY(password_entry));
@@ -70,21 +108,64 @@ static void on_login_clicked(GtkWidget *widget, gpointer data)
   // Validate input
   if (strlen(email) == 0 || strlen(password) == 0)
   {
-    gtk_label_set_text(GTK_LABEL(status_label), "All fields are required!");
+    show_error_dialog(window, "Email and password are required");
+    return;
+  }
+
+  // Connect to server
+  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sockfd < 0)
+  {
+    show_error_dialog(window, "Failed to create socket");
+    return;
+  }
+
+  struct sockaddr_in server_addr;
+  memset(&server_addr, 0, sizeof(server_addr));
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_port = htons(SERVER_PORT);
+  if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0)
+  {
+    show_error_dialog(window, "Invalid address");
+    close(sockfd);
+    return;
+  }
+
+  if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+  {
+    show_error_dialog(window, "Connection failed");
+    close(sockfd);
     return;
   }
 
   // Login user
-  AuthResult result = login_user(conn, email, password);
-
-  if (result.success)
+  LoginResult login_result = client_login_user(sockfd, email, password);
+  if (login_result.success)
   {
-    gtk_label_set_text(GTK_LABEL(status_label), "Login successful!");
-    // Here you would typically open the main application window
+    // Hide login window
+    gtk_widget_hide(window);
+
+    // Create Discord window
+    DiscordWindow *discord = create_discord_window(login_result.user_id, email);
+
+    // Connect to chat server using the same socket
+    if (!connect_to_chat_server(login_result.user_id, email))
+    {
+      show_error_dialog(window, "Failed to connect to chat server");
+      destroy_discord_window(discord);
+      gtk_widget_show(window);
+      close(sockfd);
+    }
+    else
+    {
+      // Request initial channel list and user list
+      request_channel_history(1); // Request history for default channel
+    }
   }
   else
   {
-    gtk_label_set_text(GTK_LABEL(status_label), result.error_message);
+    show_error_dialog(window, login_result.error_message);
+    close(sockfd);
   }
 }
 
@@ -132,12 +213,12 @@ static GtkWidget *create_registration_form()
   gtk_box_pack_start(GTK_BOX(vbox), status_label, FALSE, FALSE, 0);
 
   // Store references to widgets for the callback
-  g_object_set_data(G_OBJECT(register_button), "first_name", first_name_entry);
-  g_object_set_data(G_OBJECT(register_button), "last_name", last_name_entry);
-  g_object_set_data(G_OBJECT(register_button), "email", email_entry);
-  g_object_set_data(G_OBJECT(register_button), "password", password_entry);
-  g_object_set_data(G_OBJECT(register_button), "confirm_password", confirm_password_entry);
-  g_object_set_data(G_OBJECT(register_button), "status", status_label);
+  g_object_set_data(G_OBJECT(register_button), "window", window);
+  g_object_set_data(G_OBJECT(register_button), "first_name_entry", first_name_entry);
+  g_object_set_data(G_OBJECT(register_button), "last_name_entry", last_name_entry);
+  g_object_set_data(G_OBJECT(register_button), "email_entry", email_entry);
+  g_object_set_data(G_OBJECT(register_button), "password_entry", password_entry);
+  g_object_set_data(G_OBJECT(register_button), "confirm_password_entry", confirm_password_entry);
 
   // Connect the callback
   g_signal_connect(register_button, "clicked", G_CALLBACK(on_register_clicked), NULL);
@@ -176,8 +257,9 @@ static GtkWidget *create_login_form()
   gtk_box_pack_start(GTK_BOX(vbox), status_label, FALSE, FALSE, 0);
 
   // Store references to widgets for the callback
-  g_object_set_data(G_OBJECT(login_button), "email", email_entry);
-  g_object_set_data(G_OBJECT(login_button), "password", password_entry);
+  g_object_set_data(G_OBJECT(login_button), "window", window);
+  g_object_set_data(G_OBJECT(login_button), "email_entry", email_entry);
+  g_object_set_data(G_OBJECT(login_button), "password_entry", password_entry);
   g_object_set_data(G_OBJECT(login_button), "status", status_label);
 
   // Connect the callback
